@@ -13,6 +13,7 @@ import {Box} from "../src/Box.sol";
 import {GovToken} from "../src/GovToken.sol";
 import {MyGovernor} from "../src/MyGovernor.sol"; // there is a Governor.sol contract that this contract inherits from
 import {TimeLock} from "../src/TimeLock.sol";
+import {Deployer} from "../script/Deployer.s.sol";
 
 contract MyGovernorTest is Test {
     // without a specifier, these are gonna be internal vars
@@ -21,7 +22,7 @@ contract MyGovernorTest is Test {
     MyGovernor governor;
     TimeLock timeLock;
 
-    address public USER = makeAddr("user");
+    address public USER;
 
     address[] proposers;
     address[] executors;
@@ -37,7 +38,7 @@ contract MyGovernorTest is Test {
     uint256 public constant VOTING_PERIOD = 50400; // == 1 week. set this in the Openzeppelin contract wizard
 
     function setUp() public {
-        // For now, deployment is handled here, not separately with a deploy script.
+        /*// For now, deployment is handled here, not separately with a deploy script.
         // In order to delpoy the governor, we need both the govToken and the Timelock, so we deploy those first
         govToken = new GovToken();
         govToken.mint(USER, INITIAL_SUPPLY);
@@ -50,7 +51,16 @@ contract MyGovernorTest is Test {
         timeLock = new TimeLock(MIN_DELAY, proposers, executors);
 
         // now that we have the govToken and the timeLock, we can finally deploy our governor
-        governor = new MyGovernor(govToken, timeLock);
+        governor = new MyGovernor(govToken, timeLock);*/
+
+        Deployer deployer = new Deployer();
+        (box, govToken, governor, timeLock, USER) = deployer.run();
+
+        govToken.mint(USER, INITIAL_SUPPLY); // mint to the USER address
+
+        // @notice just because we minted this token and have a balance, we cannot vote. We need to delegate voting power to ourselves
+        vm.startPrank(USER);
+        govToken.delegate(USER); // delegate here
 
         /**
          * Timelock starts with some default roles. (These are defined as public vars, so there is a getter for them by default.)
@@ -65,19 +75,36 @@ contract MyGovernorTest is Test {
         bytes32 executorRole = timeLock.EXECUTOR_ROLE();
         bytes32 adminRole = timeLock.TIMELOCK_ADMIN_ROLE();
 
-        //grantRole() funcion is defined in AccessControl.sol, TImeLockConroller inherits it.
+        /**
+         * This is all needed if the deployments are handled by a separate deploy script
+         * In that case the owner of the timeLock is the deployer, not the user.
+         * This is an issue because by defualt the admin who can grant any roles is the owner of the contract.
+         * Hence, the deployer first needs to give admin roles to the user. Also, remove admin role from the deployer.
+         * BUT it is not possible to prank contracts, only externally owned accounts, so this is not working, this is handled in the deployer instead.
+         *
+         *     vm.startPrank(address(deployer));
+         *     timeLock.grantRole(adminRole, USER);
+         *     timeLock.revokeRole(adminRole, address(deployer));
+         *     vm.stopPrank();
+         */
+
+        // grantRole() funcion is defined in AccessControl.sol, TimeLockConroller inherits it.
+        // the USER is currently the admin, i.e. the owner of timeLock
+        // these are still being pranked
         timeLock.grantRole(proposerRole, address(governor)); // only the governor can propose to the timelock
         timeLock.grantRole(executorRole, address(0)); // anybody can execute
         timeLock.revokeRole(adminRole, USER);
 
         vm.stopPrank();
 
-        box = new Box();
+        //box = new Box();  // handled by deployer
+
         /**
          * timeLock owns the DAO, and the DAO owns the timeLock (strange relship),
          * but it is the timeLock that has the ultimate say in what goes where,
          * so we need to transfer the ownership of the box to the timeLock
          */
+        vm.prank(USER);
         box.transferOwnership(address(timeLock));
     }
 
